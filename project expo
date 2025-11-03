@@ -1,0 +1,156 @@
+# ---------------------------------------------
+# E-Commerce Sales Analysis Trend Dashboard
+# ---------------------------------------------
+
+import pandas as pd
+from dash import Dash, dcc, html, Input, Output
+import plotly.express as px
+
+# ----------------------------------------------------
+# STEP 1: Load Datasets (Replace paths with your own)
+# ----------------------------------------------------
+sales_df = pd.read_excel(r"C:\Users\User\Downloads\Ecommerce_Sales_Data.xlsx")
+region_df = pd.read_csv(r"C:\Users\User\Downloads\Ecommerce_Regional_Sales.csv")
+
+# ----------------------------------------------------
+# STEP 2: Clean and Preprocess Data
+# ----------------------------------------------------
+for df in [sales_df, region_df]:
+    df.rename(columns={
+        "Order_ID": "order_id",
+        "Order_Date": "order_date",
+        "Category": "category",
+        "Region": "region",
+        "Sales": "sales"
+    }, inplace=True)
+
+    # Keep only valid sales rows
+    df = df[pd.to_numeric(df["sales"], errors="coerce").notna()]
+    df["sales"] = df["sales"].astype(float)
+
+    # Clean and format date
+    df["order_date"] = pd.to_datetime(df["order_date"], errors="coerce")
+    df = df.dropna(subset=["order_date"])
+
+    # Standardize text
+    df["category"] = df["category"].astype(str).str.strip().str.title()
+    df["region"] = df["region"].astype(str).str.strip().str.title()
+
+    # Fill missing numeric values
+    df["sales"] = df["sales"].fillna(0)
+
+    # Reassign cleaned data
+    if "Region" in df.columns:
+        region_df = df
+    else:
+        sales_df = df
+
+# ----------------------------------------------------
+# STEP 3: Initialize Dash App
+# ----------------------------------------------------
+app = Dash(__name__)
+app.title = "E-Commerce Sales Analysis Trend"
+
+# ----------------------------------------------------
+# STEP 4: Layout
+# ----------------------------------------------------
+app.layout = html.Div([
+    html.H1("📊 E-Commerce Sales Analysis Trend", style={'textAlign': 'center'}),
+
+    # Dataset selector
+    html.Div([
+        html.Label("Select Dataset:"),
+        dcc.Dropdown(
+            id='dataset-selector',
+            options=[
+                {'label': 'Online Sales', 'value': 'online'},
+                {'label': 'Regional Sales', 'value': 'regional'}
+            ],
+            value='online',
+            clearable=False,
+            style={'width': '40%', 'margin': 'auto'}
+        )
+    ], style={'textAlign': 'center', 'marginBottom': '20px'}),
+
+    # Dynamic filters
+    html.Div(id='filters-container', style={'textAlign': 'center', 'marginBottom': '20px'}),
+
+    # Graphs
+    dcc.Graph(id='sales-trend'),
+    html.Div([
+        dcc.Graph(id='region-sales'),
+        dcc.Graph(id='category-sales')
+    ], style={'display': 'flex', 'justify-content': 'space-around'})
+])
+
+# ----------------------------------------------------
+# STEP 5: Dynamic Filter Callback
+# ----------------------------------------------------
+@app.callback(
+    Output('filters-container', 'children'),
+    Input('dataset-selector', 'value')
+)
+def update_filters(dataset):
+    df = sales_df if dataset == 'online' else region_df
+
+    years = sorted(df['order_date'].dt.year.unique())
+    categories = df['category'].unique()
+
+    return html.Div([
+        html.Label("Filter by Year:"),
+        dcc.Dropdown(
+            id='year-filter',
+            options=[{'label': str(y), 'value': y} for y in years],
+            multi=True,
+            placeholder="All years",
+            style={'width': '200px', 'display': 'inline-block', 'marginRight': '20px'}
+        ),
+        html.Label("Filter by Category:"),
+        dcc.Dropdown(
+            id='category-filter',
+            options=[{'label': c, 'value': c} for c in categories],
+            multi=True,
+            placeholder="All categories",
+            style={'width': '200px', 'display': 'inline-block'}
+        )
+    ])
+
+# ----------------------------------------------------
+# STEP 6: Graph Update Callback
+# ----------------------------------------------------
+@app.callback(
+    [Output('sales-trend', 'figure'),
+     Output('region-sales', 'figure'),
+     Output('category-sales', 'figure')],
+    [Input('dataset-selector', 'value'),
+     Input('year-filter', 'value'),
+     Input('category-filter', 'value')]
+)
+def update_graphs(dataset, selected_years, selected_categories):
+    df = sales_df if dataset == 'online' else region_df
+
+    # Apply filters
+    if selected_years:
+        df = df[df['order_date'].dt.year.isin(selected_years)]
+    if selected_categories:
+        df = df[df['category'].isin(selected_categories)]
+
+    # Sales Trend Over Time
+    trend_fig = px.line(df, x='order_date', y='sales', color='category',
+                        title="Sales Trend Over Time", markers=True)
+
+    # Regional Performance
+    region_fig = px.bar(df, x='region', y='sales', color='region',
+                        title="Regional Sales Performance")
+
+    # Category Contribution
+    category_fig = px.pie(df, names='category', values='sales',
+                          title="Category-Wise Contribution")
+
+    return trend_fig, region_fig, category_fig
+
+# ----------------------------------------------------
+# STEP 7: Run App
+# ----------------------------------------------------
+if __name__ == '__main__':
+    app.run_server(debug=True)
